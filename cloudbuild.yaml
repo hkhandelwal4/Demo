@@ -1,18 +1,69 @@
 steps:
-# This step builds the container image.
-- name: 'gcr.io/cloud-builders/docker'
-  id: Build
+# This step deploys the new version of our container image
+# in the hello-cloudbuild Kubernetes Engine cluster.
+- name: 'gcr.io/cloud-builders/kubectl'
+  id: Deploy
   args:
-  - 'build'
-  - '-t'
-  - 'gcr.io/$PROJECT_ID/mycicd-app:$SHORT_SHA'
-  - '.'
+  - 'apply'
+  - '-f'
+  - 'kubernetes.yaml'
+  env:
+  - 'CLOUDSDK_COMPUTE_ZONE=us-central1-b'
+  - 'CLOUDSDK_CONTAINER_CLUSTER=myamcart-cluster'
 
-# This step pushes the image to Container Registry
-# The PROJECT_ID and SHORT_SHA variables are automatically
+# This step copies the applied manifest to the production branch
+# The COMMIT_SHA variable is automatically
 # replaced by Cloud Build.
-- name: 'gcr.io/cloud-builders/docker'
-  id: Push
+- name: 'gcr.io/cloud-builders/git'
+  id: Copy to production branch
+  entrypoint: /bin/sh
   args:
-  - 'push'
-  - 'gcr.io/$PROJECT_ID/mycicd-app:$SHORT_SHA'
+  - '-c'
+  - |
+    set -x && \
+    # Configure Git to create commits with Cloud Build's service account
+    git config user.email $(gcloud auth list --filter=status:ACTIVE --format='value(account)') && \
+    # Switch to the production branch and copy the kubernetes.yaml file from the candidate branch
+    git fetch origin production && git checkout production && \
+    git checkout $COMMIT_SHA kubernetes.yaml && \
+    # Commit the kubernetes.yaml file with a descriptive commit message
+    git commit -m "Manifest from commit $COMMIT_SHA
+    $(git log --format=%B -n 1 $COMMIT_SHA)" && \
+    # Push the changes back to Cloud Source Repository
+    git push origin production
+# This step clones the hello-cloudbuild-env repository
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Clone env repository
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+    gcloud source repos clone myamcart-env && \
+    cd myamcart-env && \
+    git checkout candidate && \
+    git config user.email $(gcloud auth list --filter=status:ACTIVE --format='value(account)')
+
+# This step generates the new manifest
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Generate manifest
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+     sed "s/GOOGLE_CLOUD_PROJECT/${PROJECT_ID}/g" kubernetes.yaml.tpl | \
+     sed "s/COMMIT_SHA/${SHORT_SHA}/g" > myamcart-env/kubernetes.yaml
+
+# This step pushes the manifest back to hello-cloudbuild-env
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Push manifest
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+    set -x && \
+    cd myamcart-env && \
+    git add kubernetes.yaml && \
+    git commit -m "Deploying image gcr.io/${PROJECT_ID}/myamcart-cloudbuild:${SHORT_SHA}
+    Built from commit ${COMMIT_SHA} of repository myamcart-app
+    Author: $(git log --format='%an <%ae>' -n 1 HEAD)" && \
+    git push origin candidate
