@@ -1,4 +1,11 @@
 FROM gcr.io/google-appengine/aspnetcore:2.1
-COPY . /app
+RUN mkdir /app
 WORKDIR /app
-ENTRYPOINT ["dotnet", "ProductAPI.dll"]
+
+COPY ProductAPI.csproj .
+RUN dotnet restore
+
+COPY . .
+RUN dotnet publish "AmCart v1.0.sln" -c Release -o out
+
+CMD ["dotnet", "out/ProductAPI.dll"]
