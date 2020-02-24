@@ -31,8 +31,8 @@ spec:
       containers:
       - name: myamcart-cloudbuild
         image: gcr.io/GOOGLE_CLOUD_PROJECT/myamcart-cloudbuild:COMMIT_SHA
-        ports:
-        - containerPort: 8080
+        # ports:
+        # - containerPort: 8080
 ---
 kind: Service
 apiVersion: v1
@@ -45,4 +45,4 @@ spec:
   - protocol: TCP
     port: 80
     targetPort: 8080
-  type: LoadBalancer
+  type: ClusterIP
